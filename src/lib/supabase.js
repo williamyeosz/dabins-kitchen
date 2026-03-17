@@ -24,12 +24,14 @@ export async function fetchRecipes() {
       *,
       ingredients(*, ingredient_nutrition:nutrition_id(*)),
       steps(*),
+      cooking_methods(*),
       recipe_tags(tags(*)),
       recipe_notes(*)
     `)
     .order('created_at', { ascending: false })
     .order('sort_order', { referencedTable: 'ingredients', ascending: true })
     .order('step_number', { referencedTable: 'steps', ascending: true })
+    .order('sort_order', { referencedTable: 'cooking_methods', ascending: true })
   if (error) throw error
   return data
 }
@@ -41,12 +43,14 @@ export async function fetchRecipe(id) {
       *,
       ingredients(*, ingredient_nutrition:nutrition_id(*)),
       steps(*),
+      cooking_methods(*),
       recipe_tags(tags(*)),
       recipe_notes(*)
     `)
     .eq('id', id)
     .order('sort_order', { referencedTable: 'ingredients', ascending: true })
     .order('step_number', { referencedTable: 'steps', ascending: true })
+    .order('sort_order', { referencedTable: 'cooking_methods', ascending: true })
     .single()
   if (error) throw error
   return data
@@ -119,6 +123,18 @@ export async function addSteps(steps) {
 
 export async function deleteStepsByRecipe(recipeId) {
   const { error } = await supabase.from('steps').delete().eq('recipe_id', recipeId)
+  if (error) throw error
+}
+
+// Cooking Methods
+export async function addCookingMethods(methods) {
+  const { data, error } = await supabase.from('cooking_methods').insert(methods).select()
+  if (error) throw error
+  return data
+}
+
+export async function deleteCookingMethodsByRecipe(recipeId) {
+  const { error } = await supabase.from('cooking_methods').delete().eq('recipe_id', recipeId)
   if (error) throw error
 }
 

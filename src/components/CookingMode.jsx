@@ -4,7 +4,7 @@ import IngredientList from './IngredientList'
 import SubstitutionModal from './SubstitutionModal'
 import { convertTemperatures } from '../lib/units'
 
-export default function CookingMode({ recipe, steps, ingredients, baseServings, currentServings, metricFirst, onExit }) {
+export default function CookingMode({ recipe, steps, ingredients, baseServings, currentServings, metricFirst, onExit, methodName }) {
   const [currentStep, setCurrentStep] = useState(0)
   const [showIngredients, setShowIngredients] = useState(false)
   const [showSubstitution, setShowSubstitution] = useState(false)
@@ -62,7 +62,10 @@ export default function CookingMode({ recipe, steps, ingredients, baseServings, 
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-warm-200 shrink-0">
         <div>
-          <h2 className="font-display text-lg font-bold text-warm-800">{recipe.title}</h2>
+          <h2 className="font-display text-lg font-bold text-warm-800">
+            {recipe.title}
+            {methodName && <span className="text-sm font-normal text-warm-400 ml-2">({methodName})</span>}
+          </h2>
           <p className="text-sm text-warm-400">Step {currentStep + 1} of {steps.length}</p>
         </div>
         <div className="flex items-center gap-2">

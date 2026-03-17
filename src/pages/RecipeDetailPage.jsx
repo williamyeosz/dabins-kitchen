@@ -30,6 +30,7 @@ export default function RecipeDetailPage() {
   const [cookingMode, setCookingMode] = useState(false)
   const [showSubstitution, setShowSubstitution] = useState(false)
   const [lang, setLang] = useState('en')
+  const [selectedMethodId, setSelectedMethodId] = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -63,6 +64,16 @@ export default function RecipeDetailPage() {
   const availableLangs = ['en', ...Object.keys(langNotes)]
   const showLangToggle = Object.keys(langNotes).length > 0
 
+  // Cooking method variations
+  const methods = recipe.cooking_methods || []
+  const hasMultipleMethods = methods.length > 0
+  const methodOptions = [
+    { id: null, name: 'Default', cook_time_minutes: recipe.cook_time_minutes },
+    ...methods.map(m => ({ id: m.id, name: m.name, cook_time_minutes: m.cook_time_minutes })),
+  ]
+  const selectedMethod = methodOptions.find(m => m.id === selectedMethodId) || methodOptions[0]
+  const effectiveCookTime = selectedMethod.cook_time_minutes ?? recipe.cook_time_minutes
+
   const getTitle = () => {
     if (lang !== 'en' && langNotes[lang]?.title) return langNotes[lang].title
     return recipe.title
@@ -76,19 +87,21 @@ export default function RecipeDetailPage() {
         instruction,
       }))
     }
-    return recipe.steps || []
+    const allSteps = recipe.steps || []
+    return allSteps.filter(s => (s.cooking_method_id || null) === selectedMethodId)
   }
 
   if (cookingMode) {
     return (
       <CookingMode
-        recipe={recipe}
+        recipe={{ ...recipe, cook_time_minutes: effectiveCookTime }}
         steps={getSteps()}
         ingredients={recipe.ingredients || []}
         baseServings={recipe.base_servings}
         currentServings={servings}
         metricFirst={metricFirst}
         onExit={() => setCookingMode(false)}
+        methodName={selectedMethod.name !== 'Default' ? selectedMethod.name : null}
       />
     )
   }
@@ -163,10 +176,10 @@ export default function RecipeDetailPage() {
               {recipe.difficulty}
             </span>
           )}
-          {recipe.cook_time_minutes && (
+          {effectiveCookTime && (
             <span className="flex items-center gap-1 text-sm text-warm-500">
               <Clock size={16} />
-              {recipe.cook_time_minutes} min
+              {effectiveCookTime} min
             </span>
           )}
           {tags.map(tag => (
@@ -226,6 +239,26 @@ export default function RecipeDetailPage() {
         <div className="lg:col-span-2 space-y-8">
           <div>
             <h2 className="font-display text-xl font-semibold text-warm-800 mb-4">Steps</h2>
+            {hasMultipleMethods && (
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {methodOptions.map(m => (
+                  <button
+                    key={m.id ?? 'default'}
+                    onClick={() => setSelectedMethodId(m.id)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      selectedMethodId === m.id
+                        ? 'bg-kitchen-green text-white'
+                        : 'bg-warm-100 text-warm-600 hover:bg-warm-200'
+                    }`}
+                  >
+                    {m.name}
+                    {m.cook_time_minutes && m.id !== null && (
+                      <span className="ml-1 opacity-70">({m.cook_time_minutes}m)</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
             <StepViewer steps={steps} />
           </div>
 

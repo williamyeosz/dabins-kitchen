@@ -10,6 +10,7 @@ import {
   addSteps, deleteStepsByRecipe,
   setRecipeTags, createTag,
   deleteNotesByRecipe,
+  addCookingMethods, deleteCookingMethodsByRecipe,
 } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 
@@ -103,6 +104,11 @@ export default function RecipeFormPage() {
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState(null)
 
+  // Cooking method variations
+  const [cookingMethods, setCookingMethods] = useState([])
+  // null = editing default steps, number = index into cookingMethods
+  const [selectedFormMethod, setSelectedFormMethod] = useState(null)
+
   // Ingredient autocomplete state
   const [knownIngredients, setKnownIngredients] = useState([])
   const [activeAutocomplete, setActiveAutocomplete] = useState(-1)
@@ -142,7 +148,27 @@ export default function RecipeFormPage() {
           })))
         }
 
-        if (recipe.steps?.length) {
+        if (recipe.cooking_methods?.length) {
+          const allSteps = recipe.steps || []
+          setCookingMethods(recipe.cooking_methods.map(m => ({
+            _key: crypto.randomUUID(),
+            name: m.name,
+            cook_time_minutes: m.cook_time_minutes ?? '',
+            steps: allSteps
+              .filter(s => s.cooking_method_id === m.id)
+              .sort((a, b) => a.step_number - b.step_number)
+              .map(s => ({ _key: crypto.randomUUID(), instruction: s.instruction })),
+          })))
+          // Default steps = steps with no method
+          if (recipe.steps?.length) {
+            setSteps(
+              recipe.steps
+                .filter(s => !s.cooking_method_id)
+                .sort((a, b) => a.step_number - b.step_number)
+                .map(s => ({ _key: crypto.randomUUID(), instruction: s.instruction }))
+            )
+          }
+        } else if (recipe.steps?.length) {
           setSteps(recipe.steps.map(s => ({
             _key: crypto.randomUUID(),
             instruction: s.instruction,
@@ -224,7 +250,7 @@ export default function RecipeFormPage() {
       setImportText('')
     } catch (e) {
       console.error('Import failed:', e)
-      setImportError('Failed to parse recipe. Try pasting more complete text.')
+      setImportError(e.message || 'Failed to parse recipe. Try pasting more complete text.')
     } finally {
       setImporting(false)
     }
@@ -263,26 +289,67 @@ export default function RecipeFormPage() {
       .slice(0, 5)
   }
 
-  // Step helpers
-  const updateStep = (index, value) => {
-    setSteps(prev => prev.map((s, i) => i === index ? { ...s, instruction: value } : s))
+  // Step helpers — operate on the currently selected method's steps
+  const getActiveSteps = () => {
+    if (selectedFormMethod === null) return steps
+    return cookingMethods[selectedFormMethod]?.steps || []
   }
 
-  const addStepRow = () => setSteps(prev => [...prev, emptyStep()])
+  const setActiveSteps = (updater) => {
+    if (selectedFormMethod === null) {
+      setSteps(updater)
+    } else {
+      setCookingMethods(prev => prev.map((m, i) =>
+        i === selectedFormMethod
+          ? { ...m, steps: typeof updater === 'function' ? updater(m.steps) : updater }
+          : m
+      ))
+    }
+  }
+
+  const updateStep = (index, value) => {
+    setActiveSteps(prev => prev.map((s, i) => i === index ? { ...s, instruction: value } : s))
+  }
+
+  const addStepRow = () => setActiveSteps(prev => [...prev, emptyStep()])
 
   const removeStep = (index) => {
-    if (steps.length <= 1) return
-    setSteps(prev => prev.filter((_, i) => i !== index))
+    const active = getActiveSteps()
+    if (active.length <= 1) return
+    setActiveSteps(prev => prev.filter((_, i) => i !== index))
   }
 
   const moveStep = (index, direction) => {
+    const active = getActiveSteps()
     const target = index + direction
-    if (target < 0 || target >= steps.length) return
-    setSteps(prev => {
+    if (target < 0 || target >= active.length) return
+    setActiveSteps(prev => {
       const arr = [...prev]
       ;[arr[index], arr[target]] = [arr[target], arr[index]]
       return arr
     })
+  }
+
+  // Cooking method helpers
+  const addMethod = () => {
+    setCookingMethods(prev => [...prev, {
+      _key: crypto.randomUUID(),
+      name: '',
+      cook_time_minutes: '',
+      steps: [emptyStep()],
+    }])
+    setSelectedFormMethod(cookingMethods.length)
+  }
+
+  const removeMethod = (index) => {
+    setCookingMethods(prev => prev.filter((_, i) => i !== index))
+    setSelectedFormMethod(null)
+  }
+
+  const updateMethodField = (index, field, value) => {
+    setCookingMethods(prev => prev.map((m, i) =>
+      i === index ? { ...m, [field]: value } : m
+    ))
   }
 
   // Note helpers
@@ -320,10 +387,14 @@ export default function RecipeFormPage() {
     t.name.toLowerCase().includes(tagSearch.toLowerCase()) && !selectedTagIds.includes(t.id)
   )
 
-  // Cross-check warnings (computed live)
+  // Cross-check warnings (computed live) — include all method steps too
   const crossCheckWarnings = useMemo(() => {
-    return crossCheckIngredientsSteps(ingredients, steps)
-  }, [ingredients, steps])
+    const allSteps = [
+      ...steps,
+      ...cookingMethods.flatMap(m => m.steps),
+    ]
+    return crossCheckIngredientsSteps(ingredients, allSteps)
+  }, [ingredients, steps, cookingMethods])
 
   // Validation
   const validate = useCallback(() => {
@@ -332,9 +403,13 @@ export default function RecipeFormPage() {
     const validIngredients = ingredients.filter(i => i.name.trim())
     if (validIngredients.length === 0) errs.ingredients = 'At least one ingredient is required'
     const validSteps = steps.filter(s => s.instruction.trim())
-    if (validSteps.length === 0) errs.steps = 'At least one step is required'
+    if (validSteps.length === 0) errs.steps = 'At least one step is required for the default method'
+    cookingMethods.forEach((m, i) => {
+      if (!m.name.trim()) errs[`method_${i}_name`] = `Method ${i + 1} needs a name`
+      if (!m.steps.some(s => s.instruction.trim())) errs[`method_${i}_steps`] = `${m.name || `Method ${i + 1}`} needs at least one step`
+    })
     return errs
-  }, [title, ingredients, steps])
+  }, [title, ingredients, steps, cookingMethods])
 
   // Save
   const handleSave = async () => {
@@ -360,6 +435,8 @@ export default function RecipeFormPage() {
       if (isEdit) {
         await updateRecipe(id, recipeData)
         recipeId = id
+        // Delete cooking methods first (cascade deletes their steps)
+        await deleteCookingMethodsByRecipe(recipeId)
         await Promise.all([
           deleteIngredientsByRecipe(recipeId),
           deleteStepsByRecipe(recipeId),
@@ -413,6 +490,33 @@ export default function RecipeFormPage() {
         }))
         const { error } = await supabase.from('recipe_notes').insert(noteRows)
         if (error) throw error
+      }
+
+      // Insert cooking methods and their steps
+      if (cookingMethods.length > 0) {
+        const methodRows = cookingMethods.map((m, idx) => ({
+          recipe_id: recipeId,
+          name: m.name.trim() || `Method ${idx + 1}`,
+          cook_time_minutes: m.cook_time_minutes ? parseInt(m.cook_time_minutes) : null,
+          sort_order: idx,
+        }))
+        const savedMethods = await addCookingMethods(methodRows)
+
+        const methodStepRows = []
+        savedMethods.forEach((savedMethod, idx) => {
+          const methodSteps = cookingMethods[idx].steps.filter(s => s.instruction.trim())
+          methodSteps.forEach((s, stepIdx) => {
+            methodStepRows.push({
+              recipe_id: recipeId,
+              cooking_method_id: savedMethod.id,
+              step_number: stepIdx + 1,
+              instruction: s.instruction.trim(),
+            })
+          })
+        })
+        if (methodStepRows.length > 0) {
+          await addSteps(methodStepRows)
+        }
       }
 
       // Set tags
@@ -746,13 +850,88 @@ export default function RecipeFormPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-display font-semibold text-warm-700">Steps *</h2>
           <button onClick={addStepRow} className="flex items-center gap-1 text-sm text-kitchen-green hover:text-kitchen-green/80 font-medium">
-            <Plus size={16} /> Add
+            <Plus size={16} /> Add Step
           </button>
         </div>
-        {errors.steps && <p className="text-red-500 text-xs mb-3">{errors.steps}</p>}
+
+        {/* Method tabs */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          <button
+            onClick={() => setSelectedFormMethod(null)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              selectedFormMethod === null
+                ? 'bg-kitchen-green text-white'
+                : 'bg-warm-100 text-warm-600 hover:bg-warm-200'
+            }`}
+          >
+            Default
+          </button>
+          {cookingMethods.map((m, i) => (
+            <button
+              key={m._key}
+              onClick={() => setSelectedFormMethod(i)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
+                selectedFormMethod === i
+                  ? 'bg-kitchen-green text-white'
+                  : 'bg-warm-100 text-warm-600 hover:bg-warm-200'
+              }`}
+            >
+              {m.name || `Method ${i + 1}`}
+              <span
+                onClick={(e) => { e.stopPropagation(); removeMethod(i) }}
+                className="ml-1 hover:text-kitchen-red cursor-pointer"
+              >
+                <X size={12} />
+              </span>
+            </button>
+          ))}
+          <button
+            onClick={addMethod}
+            className="px-4 py-2 rounded-lg text-sm font-medium border-2 border-dashed border-warm-300 text-warm-500 hover:border-kitchen-green hover:text-kitchen-green transition-colors"
+          >
+            + Add Method
+          </button>
+        </div>
+
+        {/* Method name & cook time (only for non-default methods) */}
+        {selectedFormMethod !== null && cookingMethods[selectedFormMethod] && (
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-warm-600 mb-1">Method Name *</label>
+              <input
+                type="text"
+                value={cookingMethods[selectedFormMethod].name}
+                onChange={e => updateMethodField(selectedFormMethod, 'name', e.target.value)}
+                placeholder="e.g. Instant Pot, Slow Cooker"
+                className={`w-full rounded-lg border px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green ${
+                  errors[`method_${selectedFormMethod}_name`] ? 'border-red-300' : 'border-warm-200'
+                }`}
+              />
+              {errors[`method_${selectedFormMethod}_name`] && (
+                <p className="text-red-500 text-xs mt-1">{errors[`method_${selectedFormMethod}_name`]}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-warm-600 mb-1">Cook Time (min)</label>
+              <input
+                type="number"
+                value={cookingMethods[selectedFormMethod].cook_time_minutes}
+                onChange={e => updateMethodField(selectedFormMethod, 'cook_time_minutes', e.target.value)}
+                placeholder="Override cook time"
+                min="0"
+                className="w-full rounded-lg border border-warm-200 px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green"
+              />
+            </div>
+          </div>
+        )}
+
+        {errors.steps && selectedFormMethod === null && <p className="text-red-500 text-xs mb-3">{errors.steps}</p>}
+        {selectedFormMethod !== null && errors[`method_${selectedFormMethod}_steps`] && (
+          <p className="text-red-500 text-xs mb-3">{errors[`method_${selectedFormMethod}_steps`]}</p>
+        )}
 
         <div className="space-y-3">
-          {steps.map((step, idx) => (
+          {getActiveSteps().map((step, idx) => (
             <div key={step._key} className="flex items-start gap-2">
               <div className="flex flex-col items-center gap-0.5 pt-2">
                 <button
@@ -766,7 +945,7 @@ export default function RecipeFormPage() {
                 <span className="text-sm font-medium text-warm-400 w-5 text-center">{idx + 1}</span>
                 <button
                   onClick={() => moveStep(idx, 1)}
-                  disabled={idx === steps.length - 1}
+                  disabled={idx === getActiveSteps().length - 1}
                   className="text-warm-400 hover:text-warm-600 disabled:opacity-30"
                   aria-label="Move step down"
                 >
@@ -782,7 +961,7 @@ export default function RecipeFormPage() {
               />
               <button
                 onClick={() => removeStep(idx)}
-                disabled={steps.length <= 1}
+                disabled={getActiveSteps().length <= 1}
                 className="text-warm-300 hover:text-kitchen-red disabled:opacity-30 pt-2"
                 aria-label="Remove step"
               >
