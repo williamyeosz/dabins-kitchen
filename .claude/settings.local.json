@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(npx:*)",
+      "Bash(cp:*)",
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

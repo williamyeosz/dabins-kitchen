@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-warm-50: #fdf8f0;
+  --color-warm-100: #f5ead6;
+  --color-warm-200: #eddcc0;
+  --color-warm-300: #dfc5a0;
+  --color-warm-400: #c9a66e;
+  --color-warm-500: #b08942;
+  --color-warm-600: #8f6e33;
+  --color-warm-700: #6e5428;
+  --color-warm-800: #4d3b1c;
+  --color-warm-900: #2d2211;
+  --color-kitchen-green: #5a7247;
+  --color-kitchen-green-light: #e8f0e4;
+  --color-kitchen-red: #c4524a;
+  --color-kitchen-orange: #d48c3a;
+  --color-kitchen-cream: #faf7f2;
+  --font-family-display: 'Georgia', 'Times New Roman', serif;
+  --font-family-body: 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', sans-serif;
+}
+
+body {
+  font-family: var(--font-family-body);
+  background-color: var(--color-kitchen-cream);
+  color: var(--color-warm-900);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-family-display);
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+}
+
+/* Cooking mode styles */
+.cooking-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: white;
+  overflow-y: auto;
+}
+
+/* Large tap targets for kitchen use */
+.kitchen-btn {
+  min-height: 48px;
+  min-width: 48px;
+  touch-action: manipulation;
+}
