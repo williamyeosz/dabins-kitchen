@@ -1,29 +1,59 @@
 import { AlertTriangle } from 'lucide-react'
 import { scaleQuantity, displayDual, formatQuantity } from '../lib/units'
 
-export default function IngredientList({ ingredients, baseServings, currentServings, metricFirst = true }) {
+export default function IngredientList({
+  ingredients, baseServings, currentServings, metricFirst = true,
+  customScale = null, anchorIngredientId = null, onIngredientClick = null,
+}) {
   return (
     <ul className="space-y-2">
       {ingredients
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
         .map(ing => {
-          const scaledCanonical = ing.canonical_quantity
-            ? scaleQuantity(ing.canonical_quantity, baseServings, currentServings)
-            : null
-          const scaledOriginal = ing.quantity
-            ? scaleQuantity(ing.quantity, baseServings, currentServings)
-            : null
+          let scaledCanonical, scaledOriginal
+
+          if (customScale != null) {
+            // Scale by custom multiplier (from "scale by ingredient")
+            scaledCanonical = ing.canonical_quantity
+              ? ing.canonical_quantity * customScale
+              : null
+            scaledOriginal = ing.quantity
+              ? ing.quantity * customScale
+              : null
+          } else {
+            scaledCanonical = ing.canonical_quantity
+              ? scaleQuantity(ing.canonical_quantity, baseServings, currentServings)
+              : null
+            scaledOriginal = ing.quantity
+              ? scaleQuantity(ing.quantity, baseServings, currentServings)
+              : null
+          }
 
           const dual = scaledCanonical && ing.canonical_unit
             ? displayDual(scaledCanonical, ing.canonical_unit, metricFirst)
             : null
 
+          const isAnchor = anchorIngredientId === ing.id
+          const isClickable = onIngredientClick && (ing.canonical_quantity || ing.quantity)
+
           return (
-            <li key={ing.id} className="flex items-start gap-2 py-1 border-b border-warm-100 last:border-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-kitchen-green mt-2 shrink-0" />
+            <li key={ing.id} className={`flex items-start gap-2 py-1 border-b border-warm-100 last:border-0 ${isAnchor ? 'bg-kitchen-green/10 -mx-2 px-2 rounded-lg' : ''}`}>
+              <span className={`w-1.5 h-1.5 rounded-full mt-2 shrink-0 ${isAnchor ? 'bg-kitchen-orange' : 'bg-kitchen-green'}`} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-warm-800">{ing.name}</span>
+                  {isClickable ? (
+                    <button
+                      onMouseDown={e => { e.preventDefault(); onIngredientClick(ing) }}
+                      className="font-medium text-warm-800 hover:text-kitchen-green hover:underline cursor-pointer text-left"
+                    >
+                      {ing.name}
+                    </button>
+                  ) : (
+                    <span className="font-medium text-warm-800">{ing.name}</span>
+                  )}
+                  {isAnchor && (
+                    <span className="text-xs text-kitchen-orange font-medium">(anchor)</span>
+                  )}
                   {!ing.scales_linearly && (
                     <span className="inline-flex items-center gap-1 text-kitchen-orange" title={ing.notes || 'Adjust to taste — does not scale linearly'}>
                       <AlertTriangle size={14} />

@@ -11,7 +11,7 @@ export default function Layout({ children }) {
   const navLinks = [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/recipes', icon: BookOpen, label: 'Recipes' },
-    { to: '/meal-planner', icon: CalendarDays, label: 'Meal Plan' },
+    // { to: '/meal-planner', icon: CalendarDays, label: 'Meal Plan' },
     { to: '/fridge', icon: Refrigerator, label: 'Fridge' },
   ]
 

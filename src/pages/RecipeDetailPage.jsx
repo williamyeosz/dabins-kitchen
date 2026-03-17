@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Printer, Play, Shuffle, Edit, Clock, ChefHat } from 'lucide-react'
+import { ArrowLeft, Printer, Play, Shuffle, Edit, Clock, ChefHat, Scale, X } from 'lucide-react'
 import { fetchRecipe } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useUnitPreference } from '../hooks/useUnitPreference'
+import { toCanonical, formatQuantity } from '../lib/units'
 import IngredientList from '../components/IngredientList'
 import ServingScaler from '../components/ServingScaler'
 import UnitToggle from '../components/UnitToggle'
@@ -31,6 +32,8 @@ export default function RecipeDetailPage() {
   const [showSubstitution, setShowSubstitution] = useState(false)
   const [lang, setLang] = useState('en')
   const [selectedMethodId, setSelectedMethodId] = useState(null)
+  const [scaleByIngredient, setScaleByIngredient] = useState(null) // { ingredientId, ingredientName, quantity, unit, ratio }
+  const [scalePanel, setScalePanel] = useState(null) // { ingredient, inputQty, inputUnit } — transient panel state
 
   useEffect(() => {
     setLoading(true)
@@ -38,6 +41,7 @@ export default function RecipeDetailPage() {
       .then(data => {
         setRecipe(data)
         setServings(data.default_serving_size || data.base_servings)
+        setSelectedMethodId(data.default_cooking_method_id || null)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -108,6 +112,53 @@ export default function RecipeDetailPage() {
 
   const steps = getSteps()
   const tags = recipe.recipe_tags?.map(rt => rt.tags).filter(Boolean) || []
+
+  // Scale-by-ingredient helpers
+  const handleIngredientClick = (ing) => {
+    // Pre-fill with the ingredient's original unit if it has one
+    const defaultUnit = ing.unit || ing.canonical_unit || ''
+    setScalePanel({ ingredient: ing, inputQty: '', inputUnit: defaultUnit })
+  }
+
+  const applyScaleByIngredient = () => {
+    if (!scalePanel || !scalePanel.inputQty) return
+    const ing = scalePanel.ingredient
+    const userQty = parseFloat(scalePanel.inputQty)
+    if (!userQty || userQty <= 0) return
+
+    const userUnit = scalePanel.inputUnit.trim()
+
+    // Convert user input to canonical
+    const userCanonical = toCanonical(userQty, userUnit)
+
+    // Get the recipe's canonical amount for this ingredient (at base servings)
+    const recipeCanonicalQty = ing.canonical_quantity
+
+    let ratio
+    if (userCanonical.quantity != null && recipeCanonicalQty) {
+      // Both convertible to canonical — compare in canonical units
+      ratio = userCanonical.quantity / recipeCanonicalQty
+    } else if (ing.quantity) {
+      // Fallback: compare raw quantities (same unit assumed)
+      ratio = userQty / ing.quantity
+    } else {
+      return // Can't calculate ratio
+    }
+
+    setScaleByIngredient({
+      ingredientId: ing.id,
+      ingredientName: ing.name,
+      quantity: userQty,
+      unit: userUnit,
+      ratio,
+    })
+    setScalePanel(null)
+  }
+
+  const resetScaleByIngredient = () => {
+    setScaleByIngredient(null)
+    setScalePanel(null)
+  }
 
   return (
     <div>
@@ -209,18 +260,117 @@ export default function RecipeDetailPage() {
           </div>
 
           <div>
-            <h2 className="font-display text-xl font-semibold text-warm-800 mb-4">Ingredients</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-xl font-semibold text-warm-800">Ingredients</h2>
+              {!scaleByIngredient && !scalePanel && (
+                <button
+                  onMouseDown={e => { e.preventDefault(); setScalePanel({ ingredient: null, inputQty: '', inputUnit: '' }) }}
+                  className="kitchen-btn flex items-center gap-1.5 text-sm text-warm-500 hover:text-kitchen-green transition-colors no-print"
+                  title="Scale all ingredients based on one ingredient amount"
+                >
+                  <Scale size={16} />
+                  Scale by ingredient
+                </button>
+              )}
+            </div>
+
+            {/* Scale-by-ingredient indicator */}
+            {scaleByIngredient && (
+              <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-kitchen-green/10 border border-kitchen-green/30 no-print">
+                <Scale size={16} className="text-kitchen-green shrink-0" />
+                <span className="text-sm text-warm-700 flex-1">
+                  Scaled to match: <strong>{formatQuantity(scaleByIngredient.quantity)} {scaleByIngredient.unit} {scaleByIngredient.ingredientName}</strong>
+                </span>
+                <button
+                  onMouseDown={e => { e.preventDefault(); resetScaleByIngredient() }}
+                  className="kitchen-btn p-1 rounded-full hover:bg-warm-200 text-warm-500 transition-colors"
+                  title="Reset to serving-based scaling"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+
+            {/* Scale-by-ingredient panel */}
+            {scalePanel && (
+              <div className="mb-3 p-3 rounded-xl border-2 border-kitchen-green/40 bg-warm-50 space-y-3 no-print">
+                <div className="text-sm font-medium text-warm-700">
+                  {scalePanel.ingredient
+                    ? <>How much <strong>{scalePanel.ingredient.name}</strong> do you have?</>
+                    : 'Click an ingredient below to scale by it, or pick one:'}
+                </div>
+                {!scalePanel.ingredient && (
+                  <select
+                    className="w-full px-3 py-2 rounded-lg border-2 border-warm-200 text-sm bg-white text-warm-800 focus:border-kitchen-green focus:outline-none"
+                    value=""
+                    onChange={e => {
+                      const ing = (recipe.ingredients || []).find(i => i.id === e.target.value)
+                      if (ing) handleIngredientClick(ing)
+                    }}
+                  >
+                    <option value="" disabled>Select ingredient...</option>
+                    {(recipe.ingredients || [])
+                      .filter(i => i.canonical_quantity || i.quantity)
+                      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+                      .map(i => (
+                        <option key={i.id} value={i.id}>{i.name}</option>
+                      ))}
+                  </select>
+                )}
+                {scalePanel.ingredient && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      placeholder="Amount"
+                      value={scalePanel.inputQty}
+                      onChange={e => setScalePanel(prev => ({ ...prev, inputQty: e.target.value }))}
+                      className="flex-1 px-3 py-2 rounded-lg border-2 border-warm-200 text-sm bg-white text-warm-800 focus:border-kitchen-green focus:outline-none"
+                      autoFocus
+                    />
+                    <input
+                      type="text"
+                      placeholder="Unit"
+                      value={scalePanel.inputUnit}
+                      onChange={e => setScalePanel(prev => ({ ...prev, inputUnit: e.target.value }))}
+                      className="w-20 px-3 py-2 rounded-lg border-2 border-warm-200 text-sm bg-white text-warm-800 focus:border-kitchen-green focus:outline-none"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  {scalePanel.ingredient && (
+                    <button
+                      onMouseDown={e => { e.preventDefault(); applyScaleByIngredient() }}
+                      className="kitchen-btn flex-1 px-4 py-2 rounded-lg bg-kitchen-green text-white text-sm font-medium hover:bg-kitchen-green/90 transition-colors"
+                    >
+                      Apply
+                    </button>
+                  )}
+                  <button
+                    onMouseDown={e => { e.preventDefault(); setScalePanel(null) }}
+                    className="kitchen-btn px-4 py-2 rounded-lg border-2 border-warm-200 text-warm-500 text-sm font-medium hover:border-warm-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <IngredientList
               ingredients={recipe.ingredients || []}
               baseServings={recipe.base_servings}
               currentServings={servings}
               metricFirst={metricFirst}
+              customScale={scaleByIngredient ? scaleByIngredient.ratio : null}
+              anchorIngredientId={scaleByIngredient ? scaleByIngredient.ingredientId : null}
+              onIngredientClick={scalePanel && !scalePanel.ingredient ? handleIngredientClick : null}
             />
           </div>
 
           <div className="no-print">
             <button
-              onClick={() => setShowSubstitution(true)}
+              onMouseDown={e => { e.preventDefault(); setShowSubstitution(true) }}
               className="kitchen-btn w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-warm-200 text-warm-600 hover:border-kitchen-green hover:text-kitchen-green transition-colors"
             >
               <Shuffle size={18} />
@@ -259,7 +409,7 @@ export default function RecipeDetailPage() {
                 ))}
               </div>
             )}
-            <StepViewer steps={steps} />
+            <StepViewer steps={steps} ingredients={recipe.ingredients || []} baseServings={recipe.base_servings} currentServings={servings} />
           </div>
 
           <NotesList

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { Plus, X, GripVertical, ChevronUp, ChevronDown, Loader2, Sparkles, AlertTriangle, ClipboardPaste, Check } from 'lucide-react'
+import { Plus, X, GripVertical, ChevronUp, ChevronDown, Loader2, Sparkles, AlertTriangle, ClipboardPaste, Check, Star } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { toCanonical } from '../lib/units'
 import { parseRecipeText } from '../lib/ai'
@@ -14,6 +14,11 @@ import {
 } from '../lib/supabase'
 import { supabase } from '../lib/supabase'
 
+const genId = () =>
+  typeof crypto.randomUUID === 'function'
+    ? genId()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36)
+
 const UNIT_OPTIONS = [
   'g', 'kg', 'ml', 'L', 'cup', 'cups', 'tbsp', 'tsp', 'oz', 'lbs',
   'piece', 'pieces', 'clove', 'cloves', 'stalk', 'stalks',
@@ -25,7 +30,7 @@ const NOTE_LABELS = ['general', 'preference', 'equipment', 'maid']
 const DIFFICULTY_OPTIONS = ['easy', 'medium', 'hard']
 
 const emptyIngredient = () => ({
-  _key: crypto.randomUUID(),
+  _key: genId(),
   name: '',
   quantity: '',
   unit: 'g',
@@ -34,15 +39,168 @@ const emptyIngredient = () => ({
 })
 
 const emptyStep = () => ({
-  _key: crypto.randomUUID(),
+  _key: genId(),
   instruction: '',
+  is_optional: false,
 })
 
 const emptyNote = () => ({
-  _key: crypto.randomUUID(),
+  _key: genId(),
   note_text: '',
   label: 'general',
 })
+
+// --- Step form row with optional toggle and ingredient auto-fill ---
+function StepFormRow({ step, idx, totalSteps, ingredients, onMove, onRemove, onUpdate, onToggleOptional }) {
+  const textareaRef = useRef(null)
+  const [suggestion, setSuggestion] = useState(null)
+  const dismissTimer = useRef(null)
+
+  const checkForIngredientMatch = useCallback((text, cursorPos) => {
+    if (!text || !ingredients?.length) { setSuggestion(null); return }
+
+    // Get the text up to cursor
+    const textBeforeCursor = text.slice(0, cursorPos).toLowerCase()
+
+    // Check each ingredient for a match at or near the cursor
+    const validIngredients = ingredients.filter(i => i.name.trim() && (i.quantity || i.quantity === 0))
+    let bestMatch = null
+
+    for (const ing of validIngredients) {
+      const ingName = ing.name.trim().toLowerCase()
+      const words = ingName.split(/\s+/)
+
+      // Try matching the full ingredient name first
+      const fullIdx = textBeforeCursor.lastIndexOf(ingName)
+      if (fullIdx !== -1 && fullIdx + ingName.length >= cursorPos - 2) {
+        // Check if the text already has a quantity before this ingredient name
+        const beforeMatch = text.slice(Math.max(0, fullIdx - 15), fullIdx).trim()
+        if (/\d+\s*(g|kg|ml|L|cup|cups|tbsp|tsp|oz|lbs|piece|pieces|clove|cloves|stalk|stalks|medium|large|small|whole|斤)\s*$/i.test(beforeMatch)) continue
+        if (!bestMatch || ingName.length > bestMatch.matchLength) {
+          bestMatch = { ing, matchStart: fullIdx, matchEnd: fullIdx + ingName.length, matchLength: ingName.length, matchText: ingName }
+        }
+        continue
+      }
+
+      // Try partial word match (at least 3 chars)
+      for (const word of words) {
+        if (word.length < 3) continue
+        const wordIdx = textBeforeCursor.lastIndexOf(word)
+        if (wordIdx !== -1 && wordIdx + word.length >= cursorPos - 2) {
+          const beforeMatch = text.slice(Math.max(0, wordIdx - 15), wordIdx).trim()
+          if (/\d+\s*(g|kg|ml|L|cup|cups|tbsp|tsp|oz|lbs|piece|pieces|clove|cloves|stalk|stalks|medium|large|small|whole|斤)\s*$/i.test(beforeMatch)) continue
+          if (!bestMatch || ingName.length > bestMatch.matchLength) {
+            bestMatch = { ing, matchStart: wordIdx, matchEnd: wordIdx + word.length, matchLength: ingName.length, matchText: word }
+          }
+        }
+      }
+    }
+
+    if (bestMatch) {
+      const { ing } = bestMatch
+      const qty = ing.quantity
+      const unit = ing.unit || ''
+      const displayText = `${qty} ${unit} ${ing.name.trim()}`.trim()
+      setSuggestion({ ...bestMatch, displayText, fullName: ing.name.trim(), qty, unit })
+
+      // Auto-dismiss after 3 seconds
+      clearTimeout(dismissTimer.current)
+      dismissTimer.current = setTimeout(() => setSuggestion(null), 3000)
+    } else {
+      setSuggestion(null)
+    }
+  }, [ingredients])
+
+  const applySuggestion = useCallback(() => {
+    if (!suggestion || !textareaRef.current) return
+    const text = step.instruction
+    // Find the ingredient name occurrence in the text and replace with "qty unit name"
+    const before = text.slice(0, suggestion.matchStart)
+    const after = text.slice(suggestion.matchEnd)
+    const replacement = suggestion.displayText
+    onUpdate(idx, before + replacement + after)
+    setSuggestion(null)
+  }, [suggestion, step.instruction, idx, onUpdate])
+
+  useEffect(() => {
+    return () => clearTimeout(dismissTimer.current)
+  }, [])
+
+  return (
+    <div key={step._key} className={`rounded-lg p-3 ${step.is_optional ? 'bg-warm-50/60 border border-dashed border-warm-300' : 'bg-warm-50'}`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-warm-400">Step {idx + 1}</span>
+          <button
+            onMouseDown={(e) => { e.preventDefault(); onMove(idx, -1) }}
+            disabled={idx === 0}
+            className="text-warm-400 hover:text-warm-600 disabled:opacity-30 p-1"
+            aria-label="Move step up"
+          >
+            <ChevronUp size={18} />
+          </button>
+          <button
+            onMouseDown={(e) => { e.preventDefault(); onMove(idx, 1) }}
+            disabled={idx === totalSteps - 1}
+            className="text-warm-400 hover:text-warm-600 disabled:opacity-30 p-1"
+            aria-label="Move step down"
+          >
+            <ChevronDown size={18} />
+          </button>
+          <button
+            onMouseDown={(e) => { e.preventDefault(); onToggleOptional(idx) }}
+            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+              step.is_optional
+                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                : 'bg-warm-100 text-warm-400 hover:bg-warm-200 hover:text-warm-600'
+            }`}
+            title={step.is_optional ? 'Mark as required' : 'Mark as optional'}
+          >
+            {step.is_optional ? 'Optional' : 'Optional?'}
+          </button>
+        </div>
+        <button
+          onMouseDown={(e) => { e.preventDefault(); onRemove(idx) }}
+          disabled={totalSteps <= 1}
+          className="text-warm-300 hover:text-kitchen-red disabled:opacity-30 p-2"
+          aria-label="Remove step"
+        >
+          <X size={20} />
+        </button>
+      </div>
+      <div className="relative">
+        <textarea
+          ref={textareaRef}
+          value={step.instruction}
+          onChange={e => {
+            onUpdate(idx, e.target.value)
+            checkForIngredientMatch(e.target.value, e.target.selectionStart)
+          }}
+          onKeyUp={e => {
+            if (e.key === ' ' || e.key === 'Backspace') {
+              checkForIngredientMatch(step.instruction, e.target.selectionStart)
+            }
+          }}
+          onBlur={() => { setTimeout(() => setSuggestion(null), 200) }}
+          placeholder={`Step ${idx + 1} instructions...`}
+          rows={2}
+          className="w-full rounded-lg border border-warm-200 px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green resize-none"
+        />
+        {suggestion && (
+          <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-warm-200 rounded-lg shadow-lg p-2 flex items-center gap-2">
+            <span className="text-xs text-warm-500">Add quantity?</span>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); applySuggestion() }}
+              className="text-sm font-medium text-kitchen-green hover:underline"
+            >
+              &rarr; {suggestion.displayText}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // --- Cross-check: find ingredients not mentioned in steps and vice versa ---
 function crossCheckIngredientsSteps(ingredients, steps) {
@@ -108,6 +266,15 @@ export default function RecipeFormPage() {
   const [cookingMethods, setCookingMethods] = useState([])
   // null = editing default steps, number = index into cookingMethods
   const [selectedFormMethod, setSelectedFormMethod] = useState(null)
+  // Default cooking method id (null = Default method is default)
+  const [defaultMethodId, setDefaultMethodId] = useState(null)
+
+  // Reset selectedFormMethod if it's out of bounds
+  useEffect(() => {
+    if (selectedFormMethod !== null && selectedFormMethod >= cookingMethods.length) {
+      setSelectedFormMethod(null)
+    }
+  }, [cookingMethods.length, selectedFormMethod])
 
   // Ingredient autocomplete state
   const [knownIngredients, setKnownIngredients] = useState([])
@@ -139,7 +306,7 @@ export default function RecipeFormPage() {
 
         if (recipe.ingredients?.length) {
           setIngredients(recipe.ingredients.map(i => ({
-            _key: crypto.randomUUID(),
+            _key: genId(),
             name: i.name,
             quantity: i.quantity ?? '',
             unit: i.unit || 'g',
@@ -148,16 +315,21 @@ export default function RecipeFormPage() {
           })))
         }
 
+        if (recipe.default_cooking_method_id) {
+          setDefaultMethodId(recipe.default_cooking_method_id)
+        }
+
         if (recipe.cooking_methods?.length) {
           const allSteps = recipe.steps || []
           setCookingMethods(recipe.cooking_methods.map(m => ({
-            _key: crypto.randomUUID(),
+            _key: genId(),
             name: m.name,
             cook_time_minutes: m.cook_time_minutes ?? '',
+            _savedId: m.id,
             steps: allSteps
               .filter(s => s.cooking_method_id === m.id)
               .sort((a, b) => a.step_number - b.step_number)
-              .map(s => ({ _key: crypto.randomUUID(), instruction: s.instruction })),
+              .map(s => ({ _key: genId(), instruction: s.instruction, is_optional: s.is_optional || false })),
           })))
           // Default steps = steps with no method
           if (recipe.steps?.length) {
@@ -165,19 +337,20 @@ export default function RecipeFormPage() {
               recipe.steps
                 .filter(s => !s.cooking_method_id)
                 .sort((a, b) => a.step_number - b.step_number)
-                .map(s => ({ _key: crypto.randomUUID(), instruction: s.instruction }))
+                .map(s => ({ _key: genId(), instruction: s.instruction, is_optional: s.is_optional || false }))
             )
           }
         } else if (recipe.steps?.length) {
           setSteps(recipe.steps.map(s => ({
-            _key: crypto.randomUUID(),
+            _key: genId(),
             instruction: s.instruction,
+            is_optional: s.is_optional || false,
           })))
         }
 
         if (recipe.recipe_notes?.length) {
           setNotes(recipe.recipe_notes.map(n => ({
-            _key: crypto.randomUUID(),
+            _key: genId(),
             note_text: n.note_text,
             label: n.label || 'general',
           })))
@@ -209,7 +382,7 @@ export default function RecipeFormPage() {
 
     if (prefill.ingredients?.length) {
       setIngredients(prefill.ingredients.map(i => ({
-        _key: crypto.randomUUID(),
+        _key: genId(),
         name: i.name || '',
         quantity: i.quantity ?? '',
         unit: i.unit || 'g',
@@ -220,14 +393,15 @@ export default function RecipeFormPage() {
 
     if (prefill.steps?.length) {
       setSteps(prefill.steps.map(s => ({
-        _key: crypto.randomUUID(),
+        _key: genId(),
         instruction: typeof s === 'string' ? s : s.instruction || '',
+        is_optional: typeof s === 'string' ? false : s.is_optional || false,
       })))
     }
 
     if (prefill.notes?.length) {
       setNotes(prefill.notes.map(n => ({
-        _key: crypto.randomUUID(),
+        _key: genId(),
         note_text: typeof n === 'string' ? n : n.note_text || '',
         label: typeof n === 'string' ? 'general' : n.label || 'general',
       })))
@@ -311,6 +485,10 @@ export default function RecipeFormPage() {
     setActiveSteps(prev => prev.map((s, i) => i === index ? { ...s, instruction: value } : s))
   }
 
+  const toggleStepOptional = (index) => {
+    setActiveSteps(prev => prev.map((s, i) => i === index ? { ...s, is_optional: !s.is_optional } : s))
+  }
+
   const addStepRow = () => setActiveSteps(prev => [...prev, emptyStep()])
 
   const removeStep = (index) => {
@@ -332,11 +510,15 @@ export default function RecipeFormPage() {
 
   // Cooking method helpers
   const addMethod = () => {
+    // Copy default steps so the user only needs to edit what's different
+    const copiedSteps = steps
+      .filter(s => s.instruction.trim())
+      .map(s => ({ _key: genId(), instruction: s.instruction }))
     setCookingMethods(prev => [...prev, {
-      _key: crypto.randomUUID(),
+      _key: genId(),
       name: '',
       cook_time_minutes: '',
-      steps: [emptyStep()],
+      steps: copiedSteps.length > 0 ? copiedSteps : [emptyStep()],
     }])
     setSelectedFormMethod(cookingMethods.length)
   }
@@ -429,6 +611,7 @@ export default function RecipeFormPage() {
         difficulty: difficulty || null,
         base_servings: parseInt(baseServings) || 4,
         default_serving_size: parseInt(defaultServingSize) || 4,
+        default_cooking_method_id: null, // will be set after methods are saved
       }
 
       let recipeId
@@ -476,6 +659,7 @@ export default function RecipeFormPage() {
           recipe_id: recipeId,
           step_number: idx + 1,
           instruction: s.instruction.trim(),
+          is_optional: s.is_optional || false,
         }))
         await addSteps(stepRows)
       }
@@ -511,11 +695,30 @@ export default function RecipeFormPage() {
               cooking_method_id: savedMethod.id,
               step_number: stepIdx + 1,
               instruction: s.instruction.trim(),
+              is_optional: s.is_optional || false,
             })
           })
         })
         if (methodStepRows.length > 0) {
           await addSteps(methodStepRows)
+        }
+
+        // Set default_cooking_method_id if one was chosen
+        if (defaultMethodId) {
+          let newDefaultId = null
+          // Check if it's an existing method ID
+          cookingMethods.forEach((m, idx) => {
+            if (m._savedId && m._savedId === defaultMethodId) {
+              newDefaultId = savedMethods[idx].id
+            }
+            // Check if it's a new method placeholder
+            if (defaultMethodId === `_new_${idx}`) {
+              newDefaultId = savedMethods[idx].id
+            }
+          })
+          if (newDefaultId) {
+            await updateRecipe(recipeId, { default_cooking_method_id: newDefaultId })
+          }
         }
       }
 
@@ -855,21 +1058,24 @@ export default function RecipeFormPage() {
         </div>
 
         {/* Method tabs */}
-        <div className="flex gap-2 mb-4 flex-wrap">
+        <div className="flex gap-2 mb-4 flex-wrap items-center">
           <button
-            onClick={() => setSelectedFormMethod(null)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            onMouseDown={(e) => { e.preventDefault(); setSelectedFormMethod(null) }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
               selectedFormMethod === null
                 ? 'bg-kitchen-green text-white'
                 : 'bg-warm-100 text-warm-600 hover:bg-warm-200'
             }`}
           >
             Default
+            {defaultMethodId === null && cookingMethods.length > 0 && (
+              <Star size={14} className="fill-current" />
+            )}
           </button>
           {cookingMethods.map((m, i) => (
             <button
               key={m._key}
-              onClick={() => setSelectedFormMethod(i)}
+              onMouseDown={(e) => { e.preventDefault(); setSelectedFormMethod(i) }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
                 selectedFormMethod === i
                   ? 'bg-kitchen-green text-white'
@@ -877,16 +1083,19 @@ export default function RecipeFormPage() {
               }`}
             >
               {m.name || `Method ${i + 1}`}
+              {defaultMethodId && defaultMethodId === m._savedId && (
+                <Star size={14} className="fill-current" />
+              )}
               <span
-                onClick={(e) => { e.stopPropagation(); removeMethod(i) }}
-                className="ml-1 hover:text-kitchen-red cursor-pointer"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeMethod(i) }}
+                className="ml-2 p-1 hover:text-kitchen-red cursor-pointer"
               >
-                <X size={12} />
+                <X size={16} />
               </span>
             </button>
           ))}
           <button
-            onClick={addMethod}
+            onMouseDown={(e) => { e.preventDefault(); addMethod() }}
             className="px-4 py-2 rounded-lg text-sm font-medium border-2 border-dashed border-warm-300 text-warm-500 hover:border-kitchen-green hover:text-kitchen-green transition-colors"
           >
             + Add Method
@@ -895,33 +1104,69 @@ export default function RecipeFormPage() {
 
         {/* Method name & cook time (only for non-default methods) */}
         {selectedFormMethod !== null && cookingMethods[selectedFormMethod] && (
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-warm-600 mb-1">Method Name *</label>
-              <input
-                type="text"
-                value={cookingMethods[selectedFormMethod].name}
-                onChange={e => updateMethodField(selectedFormMethod, 'name', e.target.value)}
-                placeholder="e.g. Instant Pot, Slow Cooker"
-                className={`w-full rounded-lg border px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green ${
-                  errors[`method_${selectedFormMethod}_name`] ? 'border-red-300' : 'border-warm-200'
-                }`}
-              />
-              {errors[`method_${selectedFormMethod}_name`] && (
-                <p className="text-red-500 text-xs mt-1">{errors[`method_${selectedFormMethod}_name`]}</p>
-              )}
+          <div className="mb-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-warm-600 mb-1">Method Name *</label>
+                <input
+                  type="text"
+                  value={cookingMethods[selectedFormMethod].name}
+                  onChange={e => updateMethodField(selectedFormMethod, 'name', e.target.value)}
+                  placeholder="e.g. Instant Pot, Slow Cooker"
+                  className={`w-full rounded-lg border px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green ${
+                    errors[`method_${selectedFormMethod}_name`] ? 'border-red-300' : 'border-warm-200'
+                  }`}
+                />
+                {errors[`method_${selectedFormMethod}_name`] && (
+                  <p className="text-red-500 text-xs mt-1">{errors[`method_${selectedFormMethod}_name`]}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-warm-600 mb-1">Cook Time (min)</label>
+                <input
+                  type="number"
+                  value={cookingMethods[selectedFormMethod].cook_time_minutes}
+                  onChange={e => updateMethodField(selectedFormMethod, 'cook_time_minutes', e.target.value)}
+                  placeholder="Override cook time"
+                  min="0"
+                  className="w-full rounded-lg border border-warm-200 px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-warm-600 mb-1">Cook Time (min)</label>
-              <input
-                type="number"
-                value={cookingMethods[selectedFormMethod].cook_time_minutes}
-                onChange={e => updateMethodField(selectedFormMethod, 'cook_time_minutes', e.target.value)}
-                placeholder="Override cook time"
-                min="0"
-                className="w-full rounded-lg border border-warm-200 px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green"
-              />
-            </div>
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault()
+                const m = cookingMethods[selectedFormMethod]
+                setDefaultMethodId(defaultMethodId === m._savedId ? null : m._savedId || `_new_${selectedFormMethod}`)
+              }}
+              className={`mt-2 flex items-center gap-1 text-xs font-medium transition-colors ${
+                defaultMethodId && (defaultMethodId === cookingMethods[selectedFormMethod]._savedId || defaultMethodId === `_new_${selectedFormMethod}`)
+                  ? 'text-kitchen-orange'
+                  : 'text-warm-400 hover:text-warm-600'
+              }`}
+            >
+              <Star size={14} className={defaultMethodId && (defaultMethodId === cookingMethods[selectedFormMethod]._savedId || defaultMethodId === `_new_${selectedFormMethod}`) ? 'fill-current' : ''} />
+              {defaultMethodId && (defaultMethodId === cookingMethods[selectedFormMethod]._savedId || defaultMethodId === `_new_${selectedFormMethod}`)
+                ? 'Default method'
+                : 'Set as default'}
+            </button>
+          </div>
+        )}
+
+        {/* Set Default as default (when Default tab is selected and there are methods) */}
+        {selectedFormMethod === null && cookingMethods.length > 0 && (
+          <div className="mb-4">
+            <button
+              onMouseDown={(e) => { e.preventDefault(); setDefaultMethodId(null) }}
+              className={`flex items-center gap-1 text-xs font-medium transition-colors ${
+                defaultMethodId === null
+                  ? 'text-kitchen-orange'
+                  : 'text-warm-400 hover:text-warm-600'
+              }`}
+            >
+              <Star size={14} className={defaultMethodId === null ? 'fill-current' : ''} />
+              {defaultMethodId === null ? 'Default method' : 'Set as default'}
+            </button>
           </div>
         )}
 
@@ -932,42 +1177,17 @@ export default function RecipeFormPage() {
 
         <div className="space-y-3">
           {getActiveSteps().map((step, idx) => (
-            <div key={step._key} className="flex items-start gap-2">
-              <div className="flex flex-col items-center gap-0.5 pt-2">
-                <button
-                  onClick={() => moveStep(idx, -1)}
-                  disabled={idx === 0}
-                  className="text-warm-400 hover:text-warm-600 disabled:opacity-30"
-                  aria-label="Move step up"
-                >
-                  <ChevronUp size={14} />
-                </button>
-                <span className="text-sm font-medium text-warm-400 w-5 text-center">{idx + 1}</span>
-                <button
-                  onClick={() => moveStep(idx, 1)}
-                  disabled={idx === getActiveSteps().length - 1}
-                  className="text-warm-400 hover:text-warm-600 disabled:opacity-30"
-                  aria-label="Move step down"
-                >
-                  <ChevronDown size={14} />
-                </button>
-              </div>
-              <textarea
-                value={step.instruction}
-                onChange={e => updateStep(idx, e.target.value)}
-                placeholder={`Step ${idx + 1} instructions...`}
-                rows={2}
-                className="flex-1 rounded-lg border border-warm-200 px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green resize-none"
-              />
-              <button
-                onClick={() => removeStep(idx)}
-                disabled={getActiveSteps().length <= 1}
-                className="text-warm-300 hover:text-kitchen-red disabled:opacity-30 pt-2"
-                aria-label="Remove step"
-              >
-                <X size={16} />
-              </button>
-            </div>
+            <StepFormRow
+              key={step._key}
+              step={step}
+              idx={idx}
+              totalSteps={getActiveSteps().length}
+              ingredients={ingredients}
+              onMove={moveStep}
+              onRemove={removeStep}
+              onUpdate={updateStep}
+              onToggleOptional={toggleStepOptional}
+            />
           ))}
         </div>
       </section>
@@ -1013,7 +1233,7 @@ export default function RecipeFormPage() {
       </section>
 
       {/* Tags */}
-      <section className="bg-white rounded-2xl p-6 shadow-sm border border-warm-100 mb-6">
+      <section className="bg-white rounded-2xl p-6 shadow-sm border border-warm-100 mb-6 relative">
         <h2 className="text-lg font-display font-semibold text-warm-700 mb-4">Tags</h2>
 
         {/* Selected tags as chips */}
@@ -1041,6 +1261,7 @@ export default function RecipeFormPage() {
             value={tagSearch}
             onChange={e => { setTagSearch(e.target.value); setShowTagDropdown(true) }}
             onFocus={() => setShowTagDropdown(true)}
+            onBlur={() => setTimeout(() => setShowTagDropdown(false), 200)}
             placeholder="Search or create tags..."
             className="w-full rounded-lg border border-warm-200 px-3 py-2 text-sm text-warm-800 focus:outline-none focus:border-kitchen-green"
           />
@@ -1070,10 +1291,6 @@ export default function RecipeFormPage() {
           )}
         </div>
 
-        {/* Close dropdown when clicking outside */}
-        {showTagDropdown && (
-          <div className="fixed inset-0 z-0" onClick={() => setShowTagDropdown(false)} />
-        )}
       </section>
 
       {/* Actions */}

@@ -58,7 +58,7 @@ const UNIT_MAP = {
 
 export function toCanonical(quantity, unit) {
   const u = UNIT_MAP[unit?.toLowerCase()]
-  if (!u || !u.canonical) return { quantity, unit: unit }
+  if (!u || !u.canonical) return { quantity: null, unit: null }
   return { quantity: quantity * u.factor, unit: u.canonical }
 }
 

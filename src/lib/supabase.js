@@ -57,10 +57,10 @@ export async function fetchRecipe(id) {
 }
 
 export async function createRecipe(recipe) {
-  const { title, description, cuisine, category, base_servings, default_serving_size, image_url, cook_time_minutes, difficulty, language_notes } = recipe
+  const { title, description, cuisine, category, base_servings, default_serving_size, image_url, cook_time_minutes, difficulty, language_notes, default_cooking_method_id } = recipe
   const { data, error } = await supabase
     .from('recipes')
-    .insert({ title, description, cuisine, category, base_servings, default_serving_size, image_url, cook_time_minutes, difficulty, language_notes })
+    .insert({ title, description, cuisine, category, base_servings, default_serving_size, image_url, cook_time_minutes, difficulty, language_notes, default_cooking_method_id })
     .select()
     .single()
   if (error) throw error
