@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Printer, Play, Shuffle, Edit, Clock, ChefHat, Scale, X } from 'lucide-react'
-import { fetchRecipe } from '../lib/supabase'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Printer, Play, Shuffle, Edit, Clock, ChefHat, Scale, X, Trash2 } from 'lucide-react'
+import { fetchRecipe, deleteRecipe, deleteIngredientsByRecipe, deleteStepsByRecipe, deleteNotesByRecipe, deleteCookingMethodsByRecipe, setRecipeTags } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useUnitPreference } from '../hooks/useUnitPreference'
 import { toCanonical, formatQuantity } from '../lib/units'
@@ -23,10 +23,12 @@ const DIFFICULTY_COLORS = {
 
 export default function RecipeDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { isAuthenticated } = useAuth()
   const { metricFirst, toggle: toggleUnits } = useUnitPreference()
   const [recipe, setRecipe] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [deleting, setDeleting] = useState(false)
   const [servings, setServings] = useState(null)
   const [cookingMode, setCookingMode] = useState(false)
   const [showSubstitution, setShowSubstitution] = useState(false)
@@ -54,6 +56,26 @@ export default function RecipeDetailPage() {
   const handleNotesUpdate = useCallback((notes) => {
     setRecipe(prev => ({ ...prev, recipe_notes: notes }))
   }, [])
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete "${recipe.title}"? This cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      await deleteCookingMethodsByRecipe(id)
+      await Promise.all([
+        deleteIngredientsByRecipe(id),
+        deleteStepsByRecipe(id),
+        deleteNotesByRecipe(id),
+        setRecipeTags(id, []),
+      ])
+      await deleteRecipe(id)
+      navigate('/')
+    } catch (err) {
+      console.error(err)
+      alert('Failed to delete recipe')
+      setDeleting(false)
+    }
+  }
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-warm-400">Loading recipe...</div>
@@ -199,9 +221,19 @@ export default function RecipeDetailPage() {
             <Printer size={20} />
           </button>
           {isAuthenticated && (
-            <Link to={`/recipes/${id}/edit`} className="kitchen-btn p-2 rounded-lg hover:bg-warm-100 text-warm-500">
-              <Edit size={20} />
-            </Link>
+            <>
+              <Link to={`/recipes/${id}/edit`} className="kitchen-btn p-2 rounded-lg hover:bg-warm-100 text-warm-500">
+                <Edit size={20} />
+              </Link>
+              <button
+                onMouseDown={e => { e.preventDefault(); handleDelete() }}
+                disabled={deleting}
+                className="kitchen-btn p-2 rounded-lg hover:bg-red-50 text-warm-400 hover:text-red-500 transition-colors"
+                title="Delete recipe"
+              >
+                <Trash2 size={20} />
+              </button>
+            </>
           )}
         </div>
       </div>
