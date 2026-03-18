@@ -24,7 +24,7 @@ export async function fetchRecipes() {
       *,
       ingredients(*, ingredient_nutrition:nutrition_id(*)),
       steps(*),
-      cooking_methods(*),
+      cooking_methods!cooking_methods_recipe_id_fkey(*),
       recipe_tags(tags(*)),
       recipe_notes(*)
     `)
@@ -43,7 +43,7 @@ export async function fetchRecipe(id) {
       *,
       ingredients(*, ingredient_nutrition:nutrition_id(*)),
       steps(*),
-      cooking_methods(*),
+      cooking_methods!cooking_methods_recipe_id_fkey(*),
       recipe_tags(tags(*)),
       recipe_notes(*)
     `)
