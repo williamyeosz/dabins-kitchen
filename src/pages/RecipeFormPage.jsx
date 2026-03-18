@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase'
 
 const genId = () =>
   typeof crypto.randomUUID === 'function'
-    ? genId()
+    ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36)
 
 const UNIT_OPTIONS = [
