@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Printer, Play, Shuffle, Edit, Clock, ChefHat, Scale, X, Trash2 } from 'lucide-react'
-import { fetchRecipe, deleteRecipe, deleteIngredientsByRecipe, deleteStepsByRecipe, deleteNotesByRecipe, deleteCookingMethodsByRecipe, setRecipeTags } from '../lib/supabase'
+import { fetchRecipe, trashRecipe, restoreRecipe } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useUnitPreference } from '../hooks/useUnitPreference'
 import { toCanonical, formatQuantity } from '../lib/units'
@@ -58,22 +58,25 @@ export default function RecipeDetailPage() {
   }, [])
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete "${recipe.title}"? This cannot be undone.`)) return
+    if (!window.confirm(`Move "${recipe.title}" to trash? You can restore it within 30 days.`)) return
     setDeleting(true)
     try {
-      await deleteCookingMethodsByRecipe(id)
-      await Promise.all([
-        deleteIngredientsByRecipe(id),
-        deleteStepsByRecipe(id),
-        deleteNotesByRecipe(id),
-        setRecipeTags(id, []),
-      ])
-      await deleteRecipe(id)
+      await trashRecipe(id)
       navigate('/')
     } catch (err) {
       console.error(err)
-      alert('Failed to delete recipe')
+      alert('Failed to move recipe to trash')
       setDeleting(false)
+    }
+  }
+
+  const handleRestore = async () => {
+    try {
+      await restoreRecipe(id)
+      setRecipe(prev => ({ ...prev, deleted_at: null }))
+    } catch (err) {
+      console.error(err)
+      alert('Failed to restore recipe')
     }
   }
 
@@ -237,6 +240,19 @@ export default function RecipeDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Trash banner */}
+      {recipe.deleted_at && (
+        <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center justify-between no-print">
+          <span>This recipe is in the trash. It will be permanently deleted on {new Date(new Date(recipe.deleted_at).getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}.</span>
+          <button
+            onMouseDown={e => { e.preventDefault(); handleRestore() }}
+            className="kitchen-btn ml-3 px-3 py-1.5 rounded-lg bg-kitchen-green text-white text-sm font-medium hover:bg-kitchen-green/90 shrink-0"
+          >
+            Restore
+          </button>
+        </div>
+      )}
 
       {/* Hero */}
       <div className="mb-8">

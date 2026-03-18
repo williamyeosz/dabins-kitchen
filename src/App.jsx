@@ -6,6 +6,7 @@ import RecipeFormPage from './pages/RecipeFormPage'
 import MealPlannerPage from './pages/MealPlannerPage'
 import ShoppingListPage from './pages/ShoppingListPage'
 import FridgeMatcherPage from './pages/FridgeMatcherPage'
+import TrashPage from './pages/TrashPage'
 export default function App() {
   return (
     <BrowserRouter>
@@ -19,6 +20,7 @@ export default function App() {
           {/* <Route path="/meal-planner" element={<MealPlannerPage />} /> */}
           {/* <Route path="/shopping-list" element={<ShoppingListPage />} /> */}
           <Route path="/fridge" element={<FridgeMatcherPage />} />
+          <Route path="/trash" element={<TrashPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

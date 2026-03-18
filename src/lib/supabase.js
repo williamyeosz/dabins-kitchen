@@ -28,6 +28,7 @@ export async function fetchRecipes() {
       recipe_tags(tags(*)),
       recipe_notes(*)
     `)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .order('sort_order', { referencedTable: 'ingredients', ascending: true })
     .order('step_number', { referencedTable: 'steps', ascending: true })
@@ -289,4 +290,44 @@ export async function updateFridgeIngredient(id, updates) {
 export async function removeFridgeIngredient(id) {
   const { error } = await supabase.from('fridge_ingredients').delete().eq('id', id)
   if (error) throw error
+}
+
+// Trash (soft-delete)
+export async function trashRecipe(id) {
+  const { error } = await supabase
+    .from('recipes')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function restoreRecipe(id) {
+  const { error } = await supabase
+    .from('recipes')
+    .update({ deleted_at: null })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchTrashedRecipes() {
+  const { data, error } = await supabase
+    .from('recipes')
+    .select('id, title, cuisine, difficulty, image_url, deleted_at')
+    .not('deleted_at', 'is', null)
+    .order('deleted_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+export async function purgeExpiredTrash() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const { data: expired } = await supabase
+    .from('recipes')
+    .select('id')
+    .not('deleted_at', 'is', null)
+    .lt('deleted_at', cutoff)
+  if (!expired?.length) return
+  for (const r of expired) {
+    await deleteRecipe(r.id)
+  }
 }

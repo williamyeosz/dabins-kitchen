@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Home, BookOpen, CalendarDays, Refrigerator, Plus, Menu, X } from 'lucide-react'
+import { Home, BookOpen, CalendarDays, Refrigerator, Plus, Menu, X, Trash2 } from 'lucide-react'
 
 export default function Layout({ children }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -13,6 +13,7 @@ export default function Layout({ children }) {
     { to: '/recipes', icon: BookOpen, label: 'Recipes' },
     // { to: '/meal-planner', icon: CalendarDays, label: 'Meal Plan' },
     { to: '/fridge', icon: Refrigerator, label: 'Fridge' },
+    { to: '/trash', icon: Trash2, label: 'Trash' },
   ]
 
   const isActive = (path) => location.pathname === path
