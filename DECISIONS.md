@@ -83,12 +83,11 @@ This document captures the key architectural and design decisions for Dabin's Ki
 
 ## Authentication Model
 
-### Single Household Account with RLS
+### No Authentication (Auth Removed)
 
-- The app uses a **single shared account** for the household (Dabin and William). There is no need for multi-user role management or per-user permissions at this stage.
-- **Row Level Security (RLS)** is still enabled on all tables, scoped to the authenticated user's ID. This ensures that even if the Supabase anon key is exposed, unauthenticated requests cannot read or modify data.
-- Supabase Auth handles session management, token refresh, and secure credential storage. Email/password login is used for simplicity.
-- If multi-user support is needed later (e.g., separate recipe collections per person), the RLS policies can be extended without changing the table schema.
+- Authentication was **removed entirely** — the `useAuth` hook is a stub that always returns `isAuthenticated: true`.
+- **RLS is enabled** but all policies allow public read/write access. This is acceptable for a private household app.
+- This decision was made to eliminate friction. Auth added complexity with no real benefit for a two-person household.
 
 ---
 
@@ -108,6 +107,59 @@ This document captures the key architectural and design decisions for Dabin's Ki
 - Recipes are formatted to fit cleanly on standard letter/A4 paper with sensible margins and page-break rules.
 - Users can trigger printing via the browser's native print dialog (`Ctrl+P` / `Cmd+P`) or a "Print Recipe" button in the UI.
 - No server-side PDF generation is needed — the browser's built-in print-to-PDF capability is sufficient for this use case.
+
+---
+
+## Cooking Methods & Optional Steps
+
+### Cooking Method Variations (Migration 006)
+
+- Recipes can have **multiple cooking methods** (e.g., stovetop vs. microwave for steamed fish), each with its own set of ordered steps.
+- A `cooking_methods` table is linked to recipes. The detail page shows tabbed navigation between methods.
+- One method can be **starred as default** via `default_cooking_method_id` on the recipes table (migration 007). NULL means show the original "Default" steps first.
+
+### Optional Steps (Migration 007)
+
+- Steps have an `is_optional` boolean flag rather than being separated into a "tips" section.
+- **Reason**: Optional steps belong in sequence (e.g., "optionally toast the sesame seeds before garnishing" makes sense between steps 4 and 5, not in a separate list).
+- Visual indicators distinguish optional steps in both StepViewer and CookingMode. CookingMode allows skipping them.
+
+---
+
+## Mobile Compatibility Patterns
+
+### onMouseDown Instead of onClick
+
+- Interactive buttons (especially near inputs/textareas) use `onMouseDown` with `e.preventDefault()` instead of `onClick`.
+- **Reason**: On mobile, `onClick` events get swallowed by textarea blur events. This was a recurring bug that caused buttons to appear unresponsive.
+
+### genId() Instead of crypto.randomUUID()
+
+- A custom ID generator (`Math.random().toString(36) + Date.now().toString(36)`) is used instead of `crypto.randomUUID()`.
+- **Reason**: `crypto.randomUUID()` is not available on non-HTTPS mobile browsers. The app is tested on phone via local network (http://10.0.0.239).
+
+### No Fixed Overlays for Dropdowns
+
+- Dropdowns are closed via `onBlur` with `setTimeout`, not `fixed inset-0` overlay divs.
+- **Reason**: Fixed overlays block all taps on the entire page on mobile, making the app unusable.
+
+---
+
+## Feature Visibility
+
+### Meal Planner Hidden, Not Deleted
+
+- Meal planner pages (MealPlannerPage, ShoppingListPage, FridgeMatcherPage) exist in code but nav links are commented out.
+- **Reason**: Feature is built but not ready for use. Code is preserved for future activation rather than being deleted and needing to be rebuilt.
+
+---
+
+## Deployment
+
+### legacy-peer-deps in .npmrc
+
+- `.npmrc` includes `legacy-peer-deps=true`.
+- **Reason**: Vite 8 + Tailwind v4 have peer dependency conflicts that break `npm install` on Vercel without this flag.
 
 ---
 

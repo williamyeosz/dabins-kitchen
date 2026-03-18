@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html>
+<head><title>Migration 007</title></head>
+<body style="font-family:monospace;padding:20px;font-size:14px;white-space:pre-wrap;word-break:break-all;">
+ALTER TABLE steps ADD COLUMN is_optional BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE recipes ADD COLUMN default_cooking_method_id UUID REFERENCES cooking_methods(id) ON DELETE SET NULL;
+</body>
+</html>

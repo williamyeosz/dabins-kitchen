@@ -22,21 +22,21 @@ src/
   components/
     Layout.jsx         — App shell with nav header (mobile hamburger + desktop)
     RecipeCard.jsx     — Card for recipe grid (image/gradient, badges, rating)
-    IngredientList.jsx — Dual-unit ingredient display with scaling
+    IngredientList.jsx — Dual-unit ingredient display with scaling + ratio-based scaling
     ServingScaler.jsx  — +/- buttons for serving size
     UnitToggle.jsx     — Metric/Imperial toggle button
     NutritionPanel.jsx — Per-serving nutrition grid with USDA attribution
     RatingWidget.jsx   — 1-5 star "mark as cooked" widget
     NotesList.jsx      — Kitchen notes with label badges (preference/equipment/maid/general)
     TagFilter.jsx      — Filter panel with tag chips and sort dropdown
-    StepViewer.jsx     — Numbered step list with temperature conversion
-    CookingMode.jsx    — Full-screen step-by-step cooking mode with Wake Lock
+    StepViewer.jsx     — Numbered step list with temperature conversion + inline ingredient quantities
+    CookingMode.jsx    — Full-screen step-by-step cooking mode with Wake Lock, timers, skip optional
     SubstitutionModal.jsx — AI ingredient substitution modal
     AIRecipeCard.jsx   — Card for AI-suggested recipes with "Add to Book" button
   pages/
     HomePage.jsx          — Recipe grid with search, filters, sorting
-    RecipeDetailPage.jsx  — Full recipe view with scaler, nutrition, cooking mode, language toggle
-    RecipeFormPage.jsx    — Add/edit recipe form with AI import, ingredient-step cross-check, autocomplete
+    RecipeDetailPage.jsx  — Full recipe view with scaler, nutrition, cooking mode, language toggle, cooking method tabs
+    RecipeFormPage.jsx    — Add/edit recipe form with AI import, ingredient-step cross-check, autocomplete, cooking methods, optional steps
     MealPlannerPage.jsx   — Weekly calendar meal planner with AI suggestions
     ShoppingListPage.jsx  — Aggregated shopping list from meal plan
     FridgeMatcherPage.jsx — Fridge inventory + recipe matching (book + AI)
@@ -44,7 +44,7 @@ src/
     useAuth.js           — Stub (always returns isAuthenticated: true, auth removed)
     useUnitPreference.js — localStorage-backed metric/imperial preference
 supabase/
-  migrations/            — 5 SQL files (schema, meal planning, v2 scaffold, RLS, seed data)
+  migrations/            — 7 SQL files (schema, meal planning, v2 scaffold, RLS, seed data, cooking methods, optional steps)
 ```
 
 ## Environment Variables
@@ -78,6 +78,9 @@ Push to `master` — Vercel auto-builds and deploys. The `.npmrc` sets `legacy-p
 - Nutrition calculated client-side: `(canonical_quantity_in_g / 100) × per_100g`, summed, divided by servings
 - Ingredients store both original unit/qty AND canonical SI (g/ml) for consistent math
 - The Supabase select queries use `.order('field', { referencedTable: 'table' })` for related table ordering (not inline `order()` syntax — that breaks)
+- Use `onMouseDown` instead of `onClick` for buttons on mobile to avoid overlay/tap issues
+- Use `genId()` fallback instead of `crypto.randomUUID()` (breaks on mobile non-HTTPS)
+- Meal planner pages exist but nav links are commented out (feature hidden, code preserved)
 
 ## Known Issues / Notes
 - Build produces a 500kB+ JS bundle warning — normal for a full SPA, not a problem
