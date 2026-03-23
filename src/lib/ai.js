@@ -52,28 +52,50 @@ function parseJSON(text) {
 }
 
 /**
+ * Fetch a recipe URL and extract its text content via serverless proxy
+ */
+export async function fetchRecipeUrl(url) {
+  const response = await fetch('/api/fetch-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || `Failed to fetch recipe page (${response.status})`)
+  }
+  const { text } = await response.json()
+  return text
+}
+
+/**
  * Parse raw recipe text into structured recipe data
  */
 export async function parseRecipeText(rawText) {
-  const system = `You are a recipe parsing assistant. Extract structured recipe data from raw text. The text may come from a website, a message, a cookbook, or be typed casually. Be smart about interpreting quantities and units. Return a single JSON object.`
+  const system = `You are a recipe parsing assistant. Extract structured recipe data from raw text. The text may come from a website, a message, a cookbook, or be typed casually — in any language including Korean, Chinese, Japanese, etc. Be smart about interpreting quantities and units. You must extract EVERY ingredient and EVERY step — do not skip or summarize. Return a single JSON object.`
 
-  const message = `Parse this into a structured recipe:
+  const message = `Parse this into a structured recipe. Extract EVERYTHING — do not skip any ingredients or steps:
 
 ${rawText}
 
 Return a single JSON object with:
-- title (string)
-- description (string, 1-2 sentences summarizing the dish)
+- title (string — in the original language, with English translation in parentheses if non-English)
+- description (string, 1-2 sentences summarizing the dish, in English)
 - cuisine (string — your best guess)
-- category (string — e.g. dinner, lunch, breakfast, dessert, snack, soup)
+- category (string — e.g. dinner, lunch, breakfast, dessert, snack, soup, side dish)
 - cook_time_minutes (number — your best estimate if not stated)
 - difficulty (string — "easy", "medium", or "hard")
 - base_servings (number — how many servings the recipe makes, default 4 if unclear)
 - ingredients (array of objects: {name, quantity (number), unit (string — use: g, kg, ml, L, cup, tbsp, tsp, oz, lbs, piece, pieces, clove, cloves, stalk, stalks, medium, large, small, whole)})
-- steps (array of strings — clear numbered instructions)
+  - For Korean T/큰술/밥숟가락 = tbsp, t/작은술/티스푼 = tsp
+  - Include the ingredient name in its original language with English in parentheses if non-English, e.g. "고등어 (mackerel)"
+  - Include ALL ingredients — sauces, marinades, garnishes, side components — everything mentioned
+- steps (array of strings — clear numbered instructions, translated to English but keep key terms in original language in parentheses)
+  - Include ALL steps from the original recipe, do not merge or summarize
 - notes (array of objects: {note_text, label} where label is "general", "preference", or "equipment" — include any tips from the text)
+  - Capture ALL tips, warnings, variations, and cooking advice mentioned anywhere in the text
 
-Be thorough. If the text mentions tips, equipment, or preferences, capture them as notes. If quantities are vague (e.g. "a handful"), make your best numeric estimate.
+Be extremely thorough. Extract every single ingredient and step. If quantities are vague (e.g. "a handful", "적당히"), make your best numeric estimate.
 
 Return ONLY the JSON object, no other text.`
 

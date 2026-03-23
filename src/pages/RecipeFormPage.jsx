@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Plus, X, GripVertical, ChevronUp, ChevronDown, Loader2, Sparkles, AlertTriangle, ClipboardPaste, Check, Star } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { toCanonical } from '../lib/units'
-import { parseRecipeText } from '../lib/ai'
+import { parseRecipeText, fetchRecipeUrl } from '../lib/ai'
 import {
   fetchRecipe, fetchTags, createRecipe, updateRecipe,
   addIngredients, deleteIngredientsByRecipe,
@@ -413,12 +413,26 @@ export default function RecipeFormPage() {
   }, [location.state, isEdit, applyPrefill])
 
   // --- AI Import handler ---
+  const isUrl = (text) => {
+    try { return /^https?:\/\//i.test(text.trim()) && Boolean(new URL(text.trim())) }
+    catch { return false }
+  }
+
+  const [importStatus, setImportStatus] = useState('')
+
   const handleImport = async () => {
     if (!importText.trim()) return
     setImporting(true)
     setImportError(null)
+    setImportStatus('')
     try {
-      const parsed = await parseRecipeText(importText.trim())
+      let textToParse = importText.trim()
+      if (isUrl(textToParse)) {
+        setImportStatus('Fetching recipe page...')
+        textToParse = await fetchRecipeUrl(textToParse)
+        setImportStatus('Parsing recipe with AI...')
+      }
+      const parsed = await parseRecipeText(textToParse)
       applyPrefill(parsed)
       setShowImport(false)
       setImportText('')
@@ -427,6 +441,7 @@ export default function RecipeFormPage() {
       setImportError(e.message || 'Failed to parse recipe. Try pasting more complete text.')
     } finally {
       setImporting(false)
+      setImportStatus('')
     }
   }
 
@@ -765,15 +780,15 @@ export default function RecipeFormPage() {
         <section className="bg-purple-50 rounded-2xl p-6 border border-purple-200 mb-6">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles size={18} className="text-purple-500" />
-            <h2 className="text-lg font-display font-semibold text-purple-800">Import from Text</h2>
+            <h2 className="text-lg font-display font-semibold text-purple-800">Import Recipe</h2>
           </div>
           <p className="text-sm text-purple-600 mb-3">
-            Paste a recipe from anywhere — a website, a message, a cookbook photo transcription, or even rough notes. AI will parse it into a structured recipe for you to review.
+            Paste a recipe URL or text from anywhere — a website link, a message, a cookbook photo transcription, or even rough notes. AI will parse it into a structured recipe for you to review.
           </p>
           <textarea
             value={importText}
             onChange={e => setImportText(e.target.value)}
-            placeholder={"Paste your recipe here...\n\nExample:\nGarlic fried rice - cook rice day before. 3 cups cold rice, 4 cloves garlic minced, 2 eggs, 2 tbsp soy sauce, sesame oil. Fry garlic in oil, push aside, scramble eggs, add rice and soy sauce, toss everything together. Finish with sesame oil."}
+            placeholder={"Paste a recipe URL or text here...\n\nExamples:\nhttps://www.maangchi.com/recipe/kimchi-jjigae\n\nOr paste recipe text directly:\nGarlic fried rice - cook rice day before. 3 cups cold rice, 4 cloves garlic minced, 2 eggs, 2 tbsp soy sauce..."}
             rows={8}
             className="w-full rounded-lg border border-purple-200 px-4 py-3 text-sm text-warm-800 focus:outline-none focus:border-purple-400 resize-none bg-white"
           />
@@ -787,7 +802,7 @@ export default function RecipeFormPage() {
               className="kitchen-btn flex items-center gap-2 px-6 py-2.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
             >
               {importing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              {importing ? 'Parsing...' : 'Import Recipe'}
+              {importing ? (importStatus || 'Parsing...') : 'Import Recipe'}
             </button>
             <button
               onClick={() => { setShowImport(false); setImportText(''); setImportError(null) }}
